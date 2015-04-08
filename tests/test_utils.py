@@ -1,13 +1,15 @@
+from functools import partial
 import os
 import shutil
 import tempfile
-
+import time
 from numpy.testing import assert_raises, assert_equal
 from six.moves import range, cPickle
 
 from fuel import config
 from fuel.iterator import DataIterator
 from fuel.utils import do_not_pickle_attributes, find_in_data_path
+from fuel.utils.parallel import producer_consumer
 
 
 @do_not_pickle_attributes("non_picklable", "bulky_attr")
@@ -85,3 +87,29 @@ class TestDoNotPickleAttributes(object):
 
     def test_value_error_attribute_non_loaded(self):
         assert_raises(ValueError, getattr, NonLoadingClass(), 'attribute')
+
+
+def send_integers(socket, n):
+    socket.send_pyobj(n)
+    for i in range(n):
+        socket.send_pyobj(i ** 2)
+        # This works around strange bug in (probably) libzmq on
+        # OS X 10.9 which one of the pyzmq developers couldn't reproduce
+        # with all the same library versions (albeit OS X 10.10)... real
+        # workers will never be this trivial.
+        time.sleep(1e-6)
+
+
+def receive_integers(socket):
+    num = socket.recv_pyobj()
+    total = 0
+    for i in range(num):
+        recv = socket.recv_pyobj()
+        total += recv
+    return total
+
+
+def test_producer_consumer():
+    assert (producer_consumer(partial(send_integers, n=2000),
+                              receive_integers)
+            == sum(i ** 2 for i in range(2000)))
