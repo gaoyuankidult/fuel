@@ -22,17 +22,25 @@ class MockH5PYData(object):
     def __init__(self, shape, dtype):
         self.data = numpy.empty(shape, dtype)
         self.dims = MockH5PYDims(len(shape))
+        self.written = 0
 
     def __setitem__(self, where, what):
         self.data[where] = what
+        self.written += len(what)
 
 
 class MockH5PYFile(dict):
+    filename = 'NOT_A_REAL_FILE.hdf5'
+
     def __init__(self):
         self.attrs = {}
+        self.flushed = 0
 
     def create_dataset(self, name, shape, dtype):
         self[name] = MockH5PYData(shape, dtype)
+
+    def flush(self):
+        self.flushed += 1
 
 
 class MockH5PYDim(object):
@@ -53,6 +61,9 @@ class MockH5PYDims(object):
 
     def create_scale(self, dataset, name):
         self.scales[name] = dataset
+
+    def __getitem__(self, index):
+        return self._dims[index]
 
 
 def create_jpeg_data(image):
@@ -338,19 +349,107 @@ class TestTrainSetWorker(unittest.TestCase):
 
 class TestTrainSetSink(unittest.TestCase):
     def setUp(self):
-        raise unittest.SkipTest("TODO")
+        self.context = zmq.Context()
+        self.hdf5_file = MockH5PYFile()
+        self.hdf5_file.create_dataset('features', (10, 3, 20, 20), 'uint8')
+        self.hdf5_file.create_dataset('targets', (10,), 'uint8')
+        self.hdf5_file.create_dataset('filenames', (10,), dtype='S100')
+        self.sink = TrainSetSink(self.hdf5_file, [2, 3, 1, 4],
+                                 logging_port=None)
 
     def tearDown(self):
-        raise unittest.SkipTest("TODO")
+        self.context.destroy()
+
+    def test_recv(self):
+        push, pull = push_pull_socket_pair(self.context)
+        push.send_pyobj(12345, zmq.SNDMORE)
+        send_arrays(push, (numpy.array([[2, 2], [3, 4], [9, 6]],
+                                       dtype='uint8'),
+                           numpy.array(['Yakko', 'Wakko', 'Dot'],
+                                       dtype='S20')))
+        label, ims, fns = self.sink.recv(pull)
+        self.assertEqual(label, 12345)
+        numpy.testing.assert_equal(ims, [[2, 2], [3, 4], [9, 6]])
+        numpy.testing.assert_equal(fns, numpy.array(['Yakko', 'Wakko', 'Dot'],
+                                                    dtype='S20'))
+
+    def simulated_run(self):
+        im_batch = numpy.random.random_integers(0, 10,
+                                                size=(2, 3, 20, 20)
+                                                ).astype('uint8')
+        fn_batch = numpy.array(['Tweedle-Dee', 'Tweedle-Dum'], dtype='S100')
+        self.sink.process((0, im_batch, fn_batch))
+        yield
+
+        im_batch = numpy.random.random_integers(0, 10,
+                                                size=(3, 3, 20, 20)
+                                                ).astype('uint8')
+        fn_batch = numpy.array(['Larry', 'Curly', 'Moe'], dtype='S100')
+        self.sink.process((1, im_batch, fn_batch))
+        yield
+
+        im_batch = numpy.random.random_integers(0, 10,
+                                                size=(1, 3, 20, 20)
+                                                ).astype('uint8')
+        fn_batch = numpy.array(['Ross Perot'], dtype='S100')
+        self.sink.process((2, im_batch, fn_batch))
+        yield
+
+        im_batch = numpy.random.random_integers(0, 10,
+                                                size=(2, 3, 20, 20)
+                                                ).astype('uint8')
+        fn_batch = numpy.array(['Matthew', 'Mark'], dtype='S100')
+        self.sink.process((3, im_batch, fn_batch))
+        yield
+
+        im_batch = numpy.random.random_integers(0, 10,
+                                                size=(2, 3, 20, 20)
+                                                ).astype('uint8')
+        fn_batch = numpy.array(['Luke', 'John'], dtype='S100')
+        self.sink.process((3, im_batch, fn_batch))
 
     def test_done(self):
-        raise unittest.SkipTest("TODO")
+        gen = self.simulated_run()
+        try:
+            while True:
+                self.assertFalse(self.sink.done())
+                next(gen)
+        except StopIteration:
+            self.assertTrue(self.sink.done())
 
     def test_process(self):
-        raise unittest.SkipTest("TODO")
+        gen = self.simulated_run()
+
+        def assert_written(i, stop=False):
+            try:
+                next(gen)
+            except StopIteration:
+                if not stop:
+                    raise
+            self.assertEqual(self.hdf5_file['features'].written, i)
+            self.assertEqual(self.hdf5_file['targets'].written, i)
+            self.assertEqual(self.hdf5_file['filenames'].written, i)
+
+        assert_written(2)
+        assert_written(5)
+        assert_written(6)
+        assert_written(8)
+        assert_written(10, True)
 
     def test_finalize(self):
-        raise unittest.SkipTest("TODO")
+        for _ in self.simulated_run():
+            pass
+        self.sink.finalize()
+        self.assertTrue('features_train_mean' in self.hdf5_file)
+        self.assertTrue('features_train_std' in self.hdf5_file)
+        self.assertTrue('train_mean' in
+                        self.hdf5_file['features'].dims.scales)
+        self.assertTrue('train_std' in
+                        self.hdf5_file['features'].dims.scales)
+        self.assertTrue(self.hdf5_file['features_train_mean'] in
+                        self.hdf5_file['features'].dims[0].scales)
+        self.assertTrue(self.hdf5_file['features_train_std'] in
+                        self.hdf5_file['features'].dims[0].scales)
 
 
 class TestTrainSetManager(unittest.TestCase):
