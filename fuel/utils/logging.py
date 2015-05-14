@@ -219,6 +219,8 @@ def zmq_log_and_monitor(logger, context, processes=(), logging_port=5559,
     logger : object
         Logger-like object with a `handle()` method similar that
         accepts :class:`logging.LogRecord` instances.
+    context : zmq.Context
+        A `zmq.Context` object used to create sockets.
     processes : sequence, optional
         Collection containing :class:`multiprocessing.Process` objects.
         The loop will continue until none of these processes is alive.
