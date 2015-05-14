@@ -239,6 +239,9 @@ class TrainSetWorker(HasZMQProcessLogger, DivideAndConquerWorker):
         self.image_dim = image_dim
         self.batch_size = batch_size
         self.logging_port = logging_port
+        self.current_tar_filename = None
+        self.current_tar_number = None
+        self.current_tar_images_processed = 0
 
     def recv(self, socket):
         number, name = uninterruptible(socket.recv_pyobj)
