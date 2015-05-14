@@ -86,7 +86,8 @@ def create_jpeg_data(image):
 
 
 def create_fake_jpeg_tar(seed, min_num_images=5, max_num_images=50,
-                         min_size=20, size_range=30, filenames=None):
+                         min_size=20, size_range=30, filenames=None,
+                         random=True):
     """Create a TAR file of ranodmly generated JPEG files.
 
     Parameters
@@ -105,14 +106,15 @@ def create_fake_jpeg_tar(seed, min_num_images=5, max_num_images=50,
     filenames : list, optional
         If provided, use these filenames. Otherwise generate them
         randomly. Must be at least `max_num_images` long.
+    random : bool, optional
+        If `False`, substitute an image full of a single number,
+        the order of that image in processing.
 
     Returns
     -------
     tar_data : bytes
         A TAR file represented as raw bytes, containing between
         `min_num_images` and `max_num_images` JPEG files (inclusive).
-    num_jpegs : int
-        The number of JPEG files inside the generated TAR file.
 
     Notes
     -----
@@ -133,15 +135,21 @@ def create_fake_jpeg_tar(seed, min_num_images=5, max_num_images=50,
     for i in xrange(rng.random_integers(min_num_images, max_num_images)):
         if filenames is None:
             files.append('%x.JPEG' % abs(hash(str(i))))
-        im = rng.normal(size=(rng.random_integers(min_size,
-                                                  min_size + size_range),
-                              rng.random_integers(min_size,
-                                                  min_size + size_range),
-                              rng.random_integers(1, 4)))
+        im = rng.random_integers(0, 255,
+                                 size=(rng.random_integers(min_size,
+                                                           min_size +
+                                                           size_range),
+                                       rng.random_integers(min_size,
+                                                           min_size +
+                                                           size_range),
+                                       rng.random_integers(1, 4)))
+        if not random:
+            im *= 0
+            im += i
         if im.shape[-1] == 2:
             im = im[:, :, :1]
         images.append(im)
-
+    files = sorted(files)
     temp_tar = io.BytesIO()
     with tarfile.open(fileobj=temp_tar, mode='w') as tar:
         for fn, image in zip(files, images):
@@ -158,11 +166,11 @@ def create_fake_jpeg_tar(seed, min_num_images=5, max_num_images=50,
                 tar.add(f.name, arcname=fn)
             finally:
                 os.remove(f.name)
-    return temp_tar.getvalue(), len(images)
+    return temp_tar.getvalue(), files[:len(images)]
 
 
 def create_fake_tar_of_tars(seed, num_inner_tars, *args, **kwargs):
-    """
+    """Create a nested TAR of TARs of JPEGs.
 
     Parameters
     ----------
@@ -178,9 +186,8 @@ def create_fake_tar_of_tars(seed, num_inner_tars, *args, **kwargs):
         JPEGs.
     names : list
         Names of the inner TAR files.
-    num_per_class : list
-        The number of JPEGs inside each inner TAR file, corresponding
-        to sorted order of the filenames.
+    jpeg_names : list of lists
+        A list of lists containing the names of JPEGs in each inner TAR.
 
 
     Notes
@@ -191,13 +198,13 @@ def create_fake_tar_of_tars(seed, num_inner_tars, *args, **kwargs):
     """
     rng = numpy.random.RandomState(seed)
     seeds = rng.random_integers(0, 500000, size=(num_inner_tars,))
-    tars, nums = list(zip(*[create_fake_jpeg_tar(s, *args, **kwargs)
-                            for s in seeds]))
+    tars, fns = list(zip(*[create_fake_jpeg_tar(s, *args, **kwargs)
+                           for s in seeds]))
     names = sorted(str(abs(hash(str(-i - 1)))) + '.tar'
                    for i, t in enumerate(tars))
     data = io.BytesIO()
     with tarfile.open(fileobj=data, mode='w') as outer:
-        for tar, num, name in zip(tars, nums, names):
+        for tar, name in zip(tars, names):
             try:
                 with NamedTemporaryFile(mode='wb', suffix='.tar',
                                         delete=False) as f:
@@ -205,7 +212,15 @@ def create_fake_tar_of_tars(seed, num_inner_tars, *args, **kwargs):
                 outer.add(f.name, arcname=name)
             finally:
                 os.remove(f.name)
-    return data.getvalue(), names, nums
+    return data.getvalue(), names, fns
+
+
+def push_pull_socket_pair(context):
+    pull = context.socket(zmq.PULL)
+    pull_port = pull.bind_to_random_port('tcp://*')
+    push = context.socket(zmq.PUSH)
+    push.connect('tcp://localhost:{}'.format(pull_port))
+    return push, pull
 
 
 def test_has_zmq_process_logger():
@@ -236,17 +251,15 @@ def test_has_zmq_process_logger():
 class TestTrainSetVentilator(unittest.TestCase):
     def setUp(self):
         self.context = zmq.Context()
-        tar, self.names, self.nums = create_fake_tar_of_tars(0, 5)
+        tar, self.names, self.jpeg_names = create_fake_tar_of_tars(0, 5)
+        self.nums = [len(j) for j in self.jpeg_names]
         self.vent = TrainSetVentilator(io.BytesIO(tar), logging_port=None)
 
     def tearDown(self):
         self.context.destroy()
 
     def test_send(self):
-        push = self.context.socket(zmq.PUSH)
-        push_port = push.bind_to_random_port('tcp://*')
-        pull = self.context.socket(zmq.PULL)
-        pull.connect('tcp://localhost:{}'.format(push_port))
+        push, pull = push_pull_socket_pair(self.context)
         self.vent.send(push, (555, 'random_stuff.tar', b'12345'))
         self.assertEqual(pull.recv_pyobj(), (555, 'random_stuff.tar'))
         self.assertEqual(pull.recv(), b'12345')
@@ -265,38 +278,59 @@ class TestTrainSetVentilator(unittest.TestCase):
 class TestTrainSetWorker(unittest.TestCase):
     def setUp(self):
         self.context = zmq.Context()
-        patch_data, _ = create_fake_jpeg_tar(0, max_num_images=20,
-                                             filenames=['train/%x.tar' %
-                                                        abs(hash(str(-i)))
-                                                        for i in range(20)])
+        self.data, self.names, self.jpeg_names = create_fake_tar_of_tars(1, 20)
+        self.nums = [len(j) for j in self.jpeg_names]
+        patch_filenames = ['train/' + f for f in sum(self.jpeg_names, [])[::5]]
+        patch_data, _ = create_fake_jpeg_tar(0, min_num_images=20,
+                                             max_num_images=20,
+                                             filenames=patch_filenames,
+                                             random=False)
+        self.patch_filenames = dict(zip(patch_filenames,
+                                        xrange(len(patch_filenames))))
         patch = io.BytesIO(patch_data)
-        self.data, self.names, self.nums = create_fake_tar_of_tars(1, 20)
-        wnid_map = dict((b.split('.')[0], a) for a, b in enumerate(self.names))
-        self.worker = TrainSetWorker(patch, self.nums, wnid_map, 10, 2, None)
+        self.wnid_map = dict((b.split('.')[0], a) for a, b in
+                             enumerate(self.names))
+        self.worker = TrainSetWorker(patch, self.wnid_map, self.nums, 10, 2,
+                                     None)
+        print(type(self.wnid_map))
 
     def tearDown(self):
         self.context.destroy()
 
     def test_send(self):
-        socket = self.context.socket(zmq.PULL)
-        port = socket.bind_to_random_port('tcp://*')
-        push = self.context.socket(zmq.PUSH)
-        push.connect('tcp://localhost:{}'.format(port))
+        push, pull = push_pull_socket_pair(self.context)
         rng = numpy.random.RandomState(5)
         images = rng.normal(size=(5, 10, 15))
         filenames = numpy.array(['abcdef', 'ghijkl', 'mnopqr', 'stuvw',
                                  'xyz12'], dtype='S6')
         self.worker.send(push, (5, images, filenames))
-        self.assertEqual(socket.recv_pyobj(), 5)
-        r_images, r_filenames = recv_arrays(socket)
+        self.assertEqual(pull.recv_pyobj(), 5)
+        r_images, r_filenames = recv_arrays(pull)
         numpy.testing.assert_equal(images, r_images)
         numpy.testing.assert_equal(filenames, r_filenames)
 
     def test_recv(self):
-        raise unittest.SkipTest("TODO")
+        push, pull = push_pull_socket_pair(self.context)
+        push.send_pyobj((555, 'random_stuff.tar'))
+        push.send(b'12345')
+        received = self.worker.recv(pull)
+        self.assertEqual(received[:2], (555, 'random_stuff.tar'))
+        self.assertEqual(received[2].getvalue(), b'12345')
 
     def test_process(self):
-        raise unittest.SkipTest("TODO")
+        with tarfile.open(fileobj=io.BytesIO(self.data)) as tar:
+            for i, inner in enumerate(tar):
+                batch = (i, inner.name,
+                         io.BytesIO(tar.extractfile(inner.name).read()))
+                for result in self.worker.process(batch):
+                    label, images, filenames = result
+                    print(type(self.wnid_map))
+                    self.assertEqual(self.wnid_map[inner.name.split('.')[0]],
+                                     label)
+                    for fn, im in zip(filenames, images):
+                        if fn in self.patch_filenames:
+                            value = self.patch_filenames[fn]
+                            self.assertTrue((im == value).all())
 
     def test_handle_exception(self):
         raise unittest.SkipTest("TODO")
