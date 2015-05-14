@@ -163,136 +163,6 @@ def ilsvrc2010(input_directory, save_path, image_dim=256,
         debug('FINISHED_SET', which_set='test')
 
 
-class TrainSetProcessingManager(LocalhostDivideAndConquerManager):
-    def __init__(self, logging_port, *args, **kwargs):
-        super(TrainSetProcessingManager, self).__init__(*args, **kwargs)
-        self.logging_port = logging_port
-
-    def wait(self):
-        terminate = False
-        context = zmq.Context()
-        try:
-            zmq_log_and_monitor(self.logger, context,
-                                processes=[self.ventilator_process,
-                                           self.sink_process],
-                                logging_port=self.logging_port,
-                                failure_threshold=logging.ERROR)
-        except KeyboardInterrupt:
-            terminate = True
-            log.info('Keyboard interrupt received.')
-        except SubprocessFailure:
-            terminate = True
-            log.info('One or more substituent processes failed.')
-        except Exception:
-            terminate = True
-        finally:
-            log.info('Shutting down child processes...')
-            self.cleanup()
-            log.info('Killed child processes.')
-            context.destroy()
-            if terminate:
-                sys.exit(1)
-
-
-def process_train_set(hdf5_file, train_archive, patch_archive,
-                      train_images_per_class, wnid_map, image_dim,
-                      num_workers, worker_batch_size):
-    """Process the ILSVRC2010 training set.
-
-    Parameters
-    ----------
-    hdf5_file : :class:`h5py.File` instance
-        HDF5 file handle to which to write. Assumes `features`, `targets`
-        and `filenames` already exist and have first dimension larger than
-        `sum(images_per_class)`.
-    train_archive :  str or file-like object
-        Filename or file handle for the TAR archive of training images.
-    patch_archive :  str or file-like object
-        Filename or file handle for the TAR archive of patch images.
-    train_images_per_class : sequence
-        A list of integers, where each element is the number of training
-        set images for the corresponding class index.
-    wnid_map : dict
-        A dictionary mapping WordNet IDs to class indices.
-    image_dim : int
-        The width and height of the desired images after resizing and
-        central cropping.
-    num_workers : int
-        The number of worker processes to spawn, in addition to a
-        source and sink process.
-    worker_batch_size : int
-        The number of images each worker should send over the socket
-        to the sink at a time.
-
-    """
-    ventilator = TrainSetVentilator(train_archive, logging_port=5559)
-    workers = [TrainSetWorker(patch_archive, wnid_map, train_images_per_class,
-                              image_dim, worker_batch_size, logging_port=5559)
-               for _ in xrange(num_workers)]
-    # TODO: additional arguments: flush_frequency, shuffle_seed
-    sink = TrainSetSink(hdf5_file, train_images_per_class, logging_port=5559)
-    manager = TrainSetProcessingManager(ventilator=ventilator, sink=sink,
-                                        workers=workers, ventilator_port=5556,
-                                        sink_port=5558, logging_port=5559)
-    manager.launch()
-    manager.wait()
-
-
-def process_other_set(hdf5_file, archive, patch_archive, groundtruth,
-                      which_set, worker_batch_size, image_dim, offset):
-    """Process and convert either the validation set or the test set.
-
-    Parameters
-    ----------
-    hdf5_file : :class:`h5py.File` instance
-        HDF5 file handle to which to write. Assumes `features`, `targets`
-        and `filenames` already exist and are at least as long as
-        `offset` plus the number of files in `archive`.
-    archive : str or file-like object
-        The path or file-handle containing the TAR file of images to be
-        processed.
-    patch_archive : str or file-like object
-        The path or file-handle containing the TAR file of patch
-        images (see :func:`extract_patch_images`).
-    groundtruth : ndarray, 1-dimensional
-        Integer targets, with the same length as the number of images
-    which_set : str
-        One of 'valid' or 'test', used to extract the right patch images.
-    worker_batch_size : int
-        The number of examples/targets to write at a time.
-    image_dim : int
-        The width and height of the desired images after resizing and
-        central cropping.
-    offset : int
-        The offset in the `features` and `targets` arrays at which to
-        begin writing rows.
-
-    Yields
-    ------
-    int
-        A stream of integers. Each represents the number of examples
-        processed so far, in increments of `worker_batch_size`.
-
-    """
-    features = hdf5_file['features']
-    targets = hdf5_file['targets']
-    filenames = hdf5_file['filenames']
-    patch_images = extract_patch_images(patch_archive, which_set)
-    with tar_open(archive) as tar:
-        start = offset
-        work_iter = cropped_resized_images_from_tar(tar, patch_images,
-                                                    image_dim, groundtruth)
-        for tuples_batch in partition_all(worker_batch_size, work_iter):
-            images, labels, files = zip(*tuples_batch)
-            this_chunk = len(images)
-            features[start:start + this_chunk] = numpy.concatenate(images)
-            targets[start:start + this_chunk] = labels
-            filenames[start:start + this_chunk] = [f.encode('ascii')
-                                                   for f in files]
-            start += this_chunk
-            yield start - offset
-
-
 class HasZMQProcessLogger(object):
     """Mixin that adds logic for seting up a ZMQ logging handler."""
     def initialize_sockets(self, *args, **kwargs):
@@ -527,6 +397,136 @@ class TrainSetSink(HasZMQProcessLogger, DivideAndConquerSink):
             self.hdf5_file['features_train_mean'])
         self.hdf5_file['features'].dims[0].attach_scale(
             self.hdf5_file['features_train_std'])
+
+
+class TrainSetManager(LocalhostDivideAndConquerManager):
+    def __init__(self, logging_port, *args, **kwargs):
+        super(TrainSetManager, self).__init__(*args, **kwargs)
+        self.logging_port = logging_port
+
+    def wait(self):
+        terminate = False
+        context = zmq.Context()
+        try:
+            zmq_log_and_monitor(self.logger, context,
+                                processes=[self.ventilator_process,
+                                           self.sink_process],
+                                logging_port=self.logging_port,
+                                failure_threshold=logging.ERROR)
+        except KeyboardInterrupt:
+            terminate = True
+            log.info('Keyboard interrupt received.')
+        except SubprocessFailure:
+            terminate = True
+            log.info('One or more substituent processes failed.')
+        except Exception:
+            terminate = True
+        finally:
+            log.info('Shutting down child processes...')
+            self.cleanup()
+            log.info('Killed child processes.')
+            context.destroy()
+            if terminate:
+                sys.exit(1)
+
+
+def process_train_set(hdf5_file, train_archive, patch_archive,
+                      train_images_per_class, wnid_map, image_dim,
+                      num_workers, worker_batch_size):
+    """Process the ILSVRC2010 training set.
+
+    Parameters
+    ----------
+    hdf5_file : :class:`h5py.File` instance
+        HDF5 file handle to which to write. Assumes `features`, `targets`
+        and `filenames` already exist and have first dimension larger than
+        `sum(images_per_class)`.
+    train_archive :  str or file-like object
+        Filename or file handle for the TAR archive of training images.
+    patch_archive :  str or file-like object
+        Filename or file handle for the TAR archive of patch images.
+    train_images_per_class : sequence
+        A list of integers, where each element is the number of training
+        set images for the corresponding class index.
+    wnid_map : dict
+        A dictionary mapping WordNet IDs to class indices.
+    image_dim : int
+        The width and height of the desired images after resizing and
+        central cropping.
+    num_workers : int
+        The number of worker processes to spawn, in addition to a
+        source and sink process.
+    worker_batch_size : int
+        The number of images each worker should send over the socket
+        to the sink at a time.
+
+    """
+    ventilator = TrainSetVentilator(train_archive, logging_port=5559)
+    workers = [TrainSetWorker(patch_archive, wnid_map, train_images_per_class,
+                              image_dim, worker_batch_size, logging_port=5559)
+               for _ in xrange(num_workers)]
+    # TODO: additional arguments: flush_frequency, shuffle_seed
+    sink = TrainSetSink(hdf5_file, train_images_per_class, logging_port=5559)
+    manager = TrainSetManager(ventilator=ventilator, sink=sink,
+                              workers=workers, ventilator_port=5556,
+                              sink_port=5558, logging_port=5559)
+    manager.launch()
+    manager.wait()
+
+
+def process_other_set(hdf5_file, archive, patch_archive, groundtruth,
+                      which_set, worker_batch_size, image_dim, offset):
+    """Process and convert either the validation set or the test set.
+
+    Parameters
+    ----------
+    hdf5_file : :class:`h5py.File` instance
+        HDF5 file handle to which to write. Assumes `features`, `targets`
+        and `filenames` already exist and are at least as long as
+        `offset` plus the number of files in `archive`.
+    archive : str or file-like object
+        The path or file-handle containing the TAR file of images to be
+        processed.
+    patch_archive : str or file-like object
+        The path or file-handle containing the TAR file of patch
+        images (see :func:`extract_patch_images`).
+    groundtruth : ndarray, 1-dimensional
+        Integer targets, with the same length as the number of images
+    which_set : str
+        One of 'valid' or 'test', used to extract the right patch images.
+    worker_batch_size : int
+        The number of examples/targets to write at a time.
+    image_dim : int
+        The width and height of the desired images after resizing and
+        central cropping.
+    offset : int
+        The offset in the `features` and `targets` arrays at which to
+        begin writing rows.
+
+    Yields
+    ------
+    int
+        A stream of integers. Each represents the number of examples
+        processed so far, in increments of `worker_batch_size`.
+
+    """
+    features = hdf5_file['features']
+    targets = hdf5_file['targets']
+    filenames = hdf5_file['filenames']
+    patch_images = extract_patch_images(patch_archive, which_set)
+    with tar_open(archive) as tar:
+        start = offset
+        work_iter = cropped_resized_images_from_tar(tar, patch_images,
+                                                    image_dim, groundtruth)
+        for tuples_batch in partition_all(worker_batch_size, work_iter):
+            images, labels, files = zip(*tuples_batch)
+            this_chunk = len(images)
+            features[start:start + this_chunk] = numpy.concatenate(images)
+            targets[start:start + this_chunk] = labels
+            filenames[start:start + this_chunk] = [f.encode('ascii')
+                                                   for f in files]
+            start += this_chunk
+            yield start - offset
 
 
 def load_image_from_tar_or_patch(tar, image_filename, patch_images):
