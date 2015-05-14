@@ -95,7 +95,6 @@ class DivideAndConquerBase(HasKeyValueDebugMethod):
         Object respecting the interface of `logging.Logger`.
 
     """
-
     sockets_done = False
 
     def __init__(self, logger=None, **kwargs):
@@ -162,9 +161,7 @@ class DivideAndConquerBase(HasKeyValueDebugMethod):
 @six.add_metaclass(ABCMeta)
 class DivideAndConquerVentilator(DivideAndConquerBase):
     """The ventilator serves tasks on a PUSH socket to workers."""
-
     default_addr = 'tcp://*'
-
     process_type = 'VENTILATOR'
 
     def __init__(self, **kwargs):
@@ -253,9 +250,7 @@ class DivideAndConquerVentilator(DivideAndConquerBase):
 @six.add_metaclass(ABCMeta)
 class DivideAndConquerWorker(DivideAndConquerBase):
     """A worker receives tasks from a ventilator, sends results to sink."""
-
     default_addr = 'tcp://localhost'
-
     process_type = 'WORKER'
 
     def done(self):

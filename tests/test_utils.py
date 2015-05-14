@@ -1,11 +1,10 @@
+import errno
 import os
 import shutil
 import tempfile
 import time
-import errno
 from numpy.testing import assert_raises, assert_equal
 from six.moves import range, cPickle
-from zmq import ZMQError
 import zmq
 
 from fuel import config

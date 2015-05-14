@@ -50,8 +50,7 @@ def ilsvrc2010(input_directory, save_path, image_dim=256,
                shuffle_train_set=True, shuffle_seed=(2015, 4, 1),
                num_workers=6, worker_batch_size=1024,
                output_filename='ilsvrc2010.hdf5'):
-    """Converter for data from the ImageNet Large Scale Visual Recognition
-    Challenge (ILSVRC) 2010 competition.
+    """Converter for data from the ILSVRC 2010 competition.
 
     Source files for this dataset can be obtained by registering at
     [ILSVRC2010WEB].

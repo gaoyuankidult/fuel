@@ -143,7 +143,7 @@ def configure_zmq_process_logger(logger, context, logging_port):
 
 def log_keys_values(logger, status, process_type=None,
                     level=logging.DEBUG, **kwargs):
-    """Log a standard-formed debug message to the given logger.
+    r"""Log a standard-formed debug message to the given logger.
 
     Parameters
     ----------
@@ -204,7 +204,6 @@ class HasKeyValueDebugMethod(object):
     a `process_type` attribute.
 
     """
-
     def debug(self, status, **kwargs):
         log_keys_values(self.logger, status,
                         getattr(self, 'process_type', None),
