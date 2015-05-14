@@ -1,4 +1,4 @@
-"""Low-level utilities for reading a variety of source data storage formats."""
+"""Low-level utilities for reading a variety of source formats."""
 import tarfile
 import six
 
