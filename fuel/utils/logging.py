@@ -19,6 +19,10 @@ class ProgressBarHandler(logging.Handler):
     curr_val_attr : str
         The attribute name used for the current value of the progress
         bar, used to trigger an update to the progress bar.
+    widgets : list, optional
+        A list of :module:`progressbar` display widgets to use.
+        Passed along to the :class:`~progressbar.ProgressBar` constructor.
+        If not provided, a default set is used.
     start_predicate : callable, optional
         A callable that returns `True` if a given `LogRecord` signals
         the start of a progress bar. If unspecified, the presence of
