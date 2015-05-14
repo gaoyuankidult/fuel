@@ -373,9 +373,7 @@ class DivideAndConquerWorker(DivideAndConquerBase):
 @six.add_metaclass(ABCMeta)
 class DivideAndConquerSink(DivideAndConquerBase):
     """A sink receives results from workers and processes them."""
-
     default_addr = 'tcp://*'
-
     process_type = 'SINK'
 
     def __init__(self, **kwargs):
