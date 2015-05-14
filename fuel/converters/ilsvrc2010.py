@@ -167,8 +167,9 @@ class HasZMQProcessLogger(object):
     """Mixin that adds logic for seting up a ZMQ logging handler."""
     def initialize_sockets(self, *args, **kwargs):
         super(HasZMQProcessLogger, self).initialize_sockets(*args, **kwargs)
-        configure_zmq_process_logger(self.logger, self.context,
-                                     self.logging_port)
+        if self.logging_port is not None:
+            configure_zmq_process_logger(self.logger, self.context,
+                                         self.logging_port)
 
 
 class TrainSetVentilator(HasZMQProcessLogger, DivideAndConquerVentilator):
@@ -181,6 +182,7 @@ class TrainSetVentilator(HasZMQProcessLogger, DivideAndConquerVentilator):
     logging_port : int
         The port on localhost on which to open a `PUSH` socket
         for sending :class:`logging.LogRecord`s.
+        If explicitly set to `None`, no socket will be opened.
 
     """
     def __init__(self, train_archive, logging_port, **kwargs):
@@ -225,6 +227,7 @@ class TrainSetWorker(HasZMQProcessLogger, DivideAndConquerWorker):
     logging_port : int, optional
         The port on localhost on which to open a `PUSH` socket
         for sending :class:`logging.LogRecord`s (default: 5559).
+        If explicitly set to `None`, no socket will be opened.
 
     """
     def __init__(self, patch_archive, wnid_map, images_per_class,
@@ -302,6 +305,7 @@ class TrainSetSink(HasZMQProcessLogger, DivideAndConquerSink):
     logging_port : int, optional
         The port on localhost on which to open a `PUSH` socket
         for sending :class:`logging.LogRecord`s (default: 5559).
+        If explicitly set to `None`, no socket will be opened.
     flush_frequency : int, optional
         How often, in number of batches, to call the `flush` method of
         `hdf5_file` (default: 256).
