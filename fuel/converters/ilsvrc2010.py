@@ -786,7 +786,7 @@ def extract_patch_images(f, which_set):
             # Pretty sure that '/' is used for tarfile regardless of
             # os.path.sep, but I officially don't care about Windows.
             tokens = info_obj.name.split('/')
-            file_which_set = tokens[1]
+            file_which_set = tokens[-2]
             if file_which_set != which_set:
                 continue
             filename = tokens[-1]
