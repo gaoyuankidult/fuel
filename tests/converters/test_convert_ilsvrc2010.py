@@ -12,11 +12,18 @@ from PIL import Image
 from six.moves import xrange
 import zmq
 
+from fuel import config
 from fuel.server import recv_arrays, send_arrays
+from fuel.utils.image import pil_imread_rgb
 from fuel.utils.logging import ZMQLoggingHandler
 from fuel.converters.ilsvrc2010 import (HasZMQProcessLogger,
                                         TrainSetVentilator, TrainSetWorker,
-                                        TrainSetSink)
+                                        TrainSetSink,
+                                        cropped_resized_images_from_tar,
+                                        extract_patch_images,
+                                        load_image_from_tar_or_patch,
+                                        permutation_by_class, read_devkit)
+from tests import skip_if_not_available
 
 
 class MockH5PYData(object):
@@ -99,7 +106,7 @@ def create_jpeg_data(image):
 
 def create_fake_jpeg_tar(seed, min_num_images=5, max_num_images=50,
                          min_size=20, size_range=30, filenames=None,
-                         random=True):
+                         random=True, gzip_probability=0.2):
     """Create a TAR file of ranodmly generated JPEG files.
 
     Parameters
@@ -121,6 +128,9 @@ def create_fake_jpeg_tar(seed, min_num_images=5, max_num_images=50,
     random : bool, optional
         If `False`, substitute an image full of a single number,
         the order of that image in processing.
+    gzip_probability : float
+        With this probability, randomly gzip the JPEG file without
+        appending a gzip suffix.
 
     Returns
     -------
@@ -157,7 +167,10 @@ def create_fake_jpeg_tar(seed, min_num_images=5, max_num_images=50,
                                        rng.random_integers(1, 4)))
         if not random:
             im *= 0
+            assert (im == 0).all()
             im += i
+            assert numpy.isscalar(i)
+            assert (im == i).all()
         if im.shape[-1] == 2:
             im = im[:, :, :1]
         images.append(im)
@@ -168,7 +181,7 @@ def create_fake_jpeg_tar(seed, min_num_images=5, max_num_images=50,
             try:
                 with NamedTemporaryFile(mode='wb', suffix='.JPEG',
                                         delete=False) as f:
-                    if rng.uniform() < 0.2:
+                    if rng.uniform() < gzip_probability:
                         gzip_data = io.BytesIO()
                         with gzip.GzipFile(mode='wb', fileobj=gzip_data) as gz:
                             gz.write(create_jpeg_data(image))
@@ -205,7 +218,7 @@ def create_fake_tar_of_tars(seed, num_inner_tars, *args, **kwargs):
     Notes
     -----
     Remainder of positional and keyword arguments are passed on to
-    :func:`create_fake_tar_of_tars`.
+    :func:`create_fake_jpeg_tars`.
 
     """
     rng = numpy.random.RandomState(seed)
@@ -225,6 +238,26 @@ def create_fake_tar_of_tars(seed, num_inner_tars, *args, **kwargs):
             finally:
                 os.remove(f.name)
     return data.getvalue(), names, fns
+
+
+def create_fake_patch_images(filenames=None, num_train=14, num_valid=15,
+                             num_test=21):
+    if filenames is None:
+        filenames = ['%x' % abs(hash(str(i))) + '.JPEG' for i in xrange(50)]
+    assert num_train + num_valid + num_test == len(filenames)
+    filenames[:num_train] = ['train/' + f
+                             for f in filenames[:num_train]]
+    filenames[num_train:num_train + num_valid] = [
+        'val/' + f for f in filenames[num_train:num_train + num_valid]
+    ]
+    filenames[num_train + num_valid:] = [
+        'test/' + f for f in filenames[num_train + num_valid:]
+    ]
+    tar = create_fake_jpeg_tar(1, min_num_images=len(filenames),
+                               max_num_images=len(filenames),
+                               filenames=filenames, random=False,
+                               gzip_probability=0.0)[0]
+    return tar, filenames
 
 
 def push_pull_socket_pair(context):
@@ -293,10 +326,11 @@ class TestTrainSetWorker(unittest.TestCase):
         self.data, self.names, self.jpeg_names = create_fake_tar_of_tars(1, 20)
         self.nums = [len(j) for j in self.jpeg_names]
         patch_filenames = ['train/' + f for f in sum(self.jpeg_names, [])[::5]]
-        patch_data, _ = create_fake_jpeg_tar(0, min_num_images=20,
+        patch_data, _ = create_fake_jpeg_tar(2, min_num_images=20,
                                              max_num_images=20,
                                              filenames=patch_filenames,
-                                             random=False)
+                                             random=False,
+                                             gzip_probability=0.0)
         self.patch_filenames = dict(zip(patch_filenames,
                                         xrange(len(patch_filenames))))
         self.patch = io.BytesIO(patch_data)
@@ -304,7 +338,6 @@ class TestTrainSetWorker(unittest.TestCase):
                              enumerate(self.names))
         self.worker = TrainSetWorker(self.patch, self.wnid_map, self.nums, 10,
                                      2, None)
-        print(type(self.wnid_map))
 
     def tearDown(self):
         self.context.destroy()
@@ -336,7 +369,6 @@ class TestTrainSetWorker(unittest.TestCase):
                          io.BytesIO(tar.extractfile(inner.name).read()))
                 for result in self.worker.process(batch):
                     label, images, filenames = result
-                    print(type(self.wnid_map))
                     self.assertEqual(self.wnid_map[inner.name.split('.')[0]],
                                      label)
                     for fn, im in zip(filenames, images):
@@ -486,10 +518,10 @@ class TestTrainSetSink(unittest.TestCase):
 
 class TestTrainSetManager(unittest.TestCase):
     def setUp(self):
-        raise unittest.SkipTest("TODO")
+        pass
 
     def tearDown(self):
-        raise unittest.SkipTest("TODO")
+        pass
 
     def test_wait(self):
         raise unittest.SkipTest("TODO")
@@ -504,24 +536,66 @@ def test_process_other_set():
 
 
 def test_cropped_resized_images_from_tar():
-    raise unittest.SkipTest("TODO")
+    images, all_filenames = create_fake_jpeg_tar(3, min_num_images=200,
+                                                 max_num_images=200,
+                                                 gzip_probability=0.0)
+    patch_data, _ = create_fake_patch_images(all_filenames[::4], num_train=50,
+                                             num_valid=0, num_test=0)
+    patches = extract_patch_images(io.BytesIO(patch_data), 'train')
+    images_data = io.BytesIO(images)
+    with tarfile.open(fileobj=images_data) as tar:
+        for tup in cropped_resized_images_from_tar(tar, patches, 7):
+            all_filenames.remove(tup[2])
+            assert tup[0].shape == (1, 3, 7, 7)
+            assert tup[1] is None
+        assert len(all_filenames) == 0
 
 
-def test_load_images_from_tar_or_patch():
-    raise unittest.SkipTest("TODO")
+def test_load_image_from_tar_or_patch():
+    images, all_filenames = create_fake_jpeg_tar(3, min_num_images=200,
+                                                 max_num_images=200,
+                                                 gzip_probability=0.0)
+    patch_data, _ = create_fake_patch_images(all_filenames[::4], num_train=50,
+                                             num_valid=0, num_test=0)
+    patches = extract_patch_images(io.BytesIO(patch_data), 'train')
+    assert len(patches) == 50
+    print(list(patches.values()))
+    with tarfile.open(fileobj=io.BytesIO(images)) as tar:
+        for fn in all_filenames:
+            image = load_image_from_tar_or_patch(tar, fn, patches)
+            if fn in patches:
+                numpy.testing.assert_equal(image, patches[fn])
+            else:
+                tar_image = pil_imread_rgb(tar.extractfile(fn))
+                numpy.testing.assert_equal(image, tar_image)
 
 
 def test_permutation_by_class():
-    raise unittest.SkipTest("TODO")
+    rng = numpy.random.RandomState(0)
+    perm = rng.permutation(10).tolist()
+    class_perms = permutation_by_class(perm, [3, 3, 4])
+    assert perm[:3] == class_perms[0]
+    assert perm[3:6] == class_perms[1]
+    assert perm[6:] == class_perms[2]
 
 
 def test_read_devkit():
-    raise unittest.SkipTest("TODO")
-
-
-def test_read_metadata():
-    raise unittest.SkipTest("TODO")
+    devkit_filename = 'ILSVRC2010_devkit-1.0.tar.gz'
+    skip_if_not_available(datasets=[devkit_filename])
+    synsets, cost_mat, raw_valid_gt = read_devkit(
+        os.path.join(config.data_path, devkit_filename))
+    assert (synsets['ILSVRC2010_ID'] ==
+            numpy.arange(1, len(synsets) + 1)).all()
+    assert synsets['num_train_images'][1000:].sum() == 0
+    assert (synsets['num_train_images'][:1000] > 0).all()
+    assert synsets.ndim == 1
+    assert cost_mat.shape == (1000, 1000)
+    assert cost_mat.dtype == 'uint8'
+    assert (cost_mat.flat[::1001] == 0).all()
 
 
 def test_extract_patch_images():
-    raise unittest.SkipTest("TODO")
+    tar, _ = create_fake_patch_images()
+    assert len(extract_patch_images(io.BytesIO(tar), 'train')) == 14
+    assert len(extract_patch_images(io.BytesIO(tar), 'valid')) == 15
+    assert len(extract_patch_images(io.BytesIO(tar), 'test')) == 21
