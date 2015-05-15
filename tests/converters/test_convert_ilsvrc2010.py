@@ -1,3 +1,4 @@
+from collections import defaultdict
 import io
 import logging
 import os
@@ -298,11 +299,11 @@ class TestTrainSetWorker(unittest.TestCase):
                                              random=False)
         self.patch_filenames = dict(zip(patch_filenames,
                                         xrange(len(patch_filenames))))
-        patch = io.BytesIO(patch_data)
+        self.patch = io.BytesIO(patch_data)
         self.wnid_map = dict((b.split('.')[0], a) for a, b in
                              enumerate(self.names))
-        self.worker = TrainSetWorker(patch, self.wnid_map, self.nums, 10, 2,
-                                     None)
+        self.worker = TrainSetWorker(self.patch, self.wnid_map, self.nums, 10,
+                                     2, None)
         print(type(self.wnid_map))
 
     def tearDown(self):
@@ -344,7 +345,38 @@ class TestTrainSetWorker(unittest.TestCase):
                             self.assertTrue((im == value).all())
 
     def test_handle_exception(self):
-        raise unittest.SkipTest("TODO")
+        class MockLogger(object):
+            def __init__(self):
+                self.num_calls = defaultdict(int)
+
+            def log(self, *args, **kwargs):
+                self.num_calls['log'] += 1
+
+            def debug(self, *args, **kwargs):
+                self.num_calls['debug'] += 1
+
+            def info(self, *args, **kwargs):
+                self.num_calls['info'] += 1
+
+            def warning(self, *args, **kwargs):
+                self.num_calls['warning'] += 1
+
+            def error(self, *args, **kwargs):
+                self.num_calls['error'] += 1
+
+            def critical(self, *args, **kwargs):
+                self.num_calls['critical'] += 1
+
+        class BrokenWorker(TrainSetWorker):
+            def recv(self, socket):
+                raise ZeroDivisionError
+
+        logger = MockLogger()
+        worker = BrokenWorker(self.patch, self.wnid_map, self.nums, 10, 2,
+                              None, logger=logger)
+        worker.initialize_sockets(self.context, 51787, 10, 51789, 10)
+        worker.run()
+        self.assertEqual(logger.num_calls['error'], 1)
 
 
 class TestTrainSetSink(unittest.TestCase):

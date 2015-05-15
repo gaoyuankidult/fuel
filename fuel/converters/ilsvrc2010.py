@@ -288,10 +288,11 @@ class TrainSetWorker(HasZMQProcessLogger, DivideAndConquerWorker):
                    total=self.current_tar_images_processed, label=label)
 
     def handle_exception(self):
-        log.error('%s(%d): Encountered error processing %s '
-                  '(%d images processed successfully)',
-                  self.process_type, os.getpid(), self.current_filename,
-                  self.images_processed, exc_info=1)
+        self.logger.error('%s(%d): Encountered error processing %s '
+                          '(%d images processed successfully)',
+                          self.process_type, os.getpid(),
+                          self.current_tar_filename,
+                          self.current_tar_images_processed, exc_info=1)
 
 
 class TrainSetSink(HasZMQProcessLogger, DivideAndConquerSink):
