@@ -48,7 +48,8 @@ ALL_FILES = IMAGE_TARS + (TEST_GROUNDTRUTH, DEVKIT_ARCHIVE, PATCH_IMAGES_TAR)
 
 def ilsvrc2010(input_directory, save_path, image_dim=256,
                shuffle_train_set=True, shuffle_seed=(2015, 4, 1),
-               num_workers=6, worker_batch_size=1024,
+               num_workers=6, worker_batch_size=1024, ventilator_port=5556,
+               sink_port=5558, logging_port=5559,
                output_filename='ilsvrc2010.hdf5'):
     """Converter for data from the ILSVRC 2010 competition.
 
@@ -76,6 +77,17 @@ def ilsvrc2010(input_directory, save_path, image_dim=256,
     worker_batch_size : int, optional
         The number of images the workers should send to the sink at a
         time.
+    ventilator_port : int, optional
+        Used for divide & conquer parallel processing of the training set.
+        The port on which the ventilator should listen. Default: 5556.
+    sink_port : int, optional
+        Used for divide & conquer parallel processing of the training set.
+        The port on which the sink should listen. Default: 5558.
+    logging_port : int, optional
+        Used for divide & conquer parallel processing of the training set.
+        The port on localhost on which to open a `PUSH` socket for sending
+        :class:`logging.LogRecord`s. Default: 5559.  If explicitly set to
+        `None`, no socket will be opened.
     output_filename : str, optional
         The output filename for the HDF5 file. Default: 'ilsvrc2010.hdf5'.
 
@@ -124,10 +136,18 @@ def ilsvrc2010(input_directory, save_path, image_dim=256,
         f.create_dataset('features', shape=(n_total, channels,
                                             height, width),
                          dtype=numpy.uint8)
-        f.create_dataset('targets', shape=(n_total,),
+        f.create_dataset('targets', shape=(n_total, 1),
                          dtype=numpy.int16)
-        f.create_dataset('filenames', shape=(n_total,),
+        f.create_dataset('filenames', shape=(n_total, 1),
                          dtype='S32')
+        f['features'].dims[0].label = 'batch'
+        f['features'].dims[1].label = 'channel'
+        f['features'].dims[2].label = 'height'
+        f['features'].dims[3].label = 'width'
+        f['targets'].dims[0].label = 'batch'
+        f['targets'].dims[1].label = 'index'
+        f['filenames'].dims[0].label = 'batch'
+        f['filenames'].dims[1].label = 'index'
         log.info('Processing training set...')
         debug('STARTED_SET', which_set='train',
               total_images_in_set=n_train)
@@ -440,7 +460,8 @@ class TrainSetManager(LocalhostDivideAndConquerManager):
 
 def process_train_set(hdf5_file, train_archive, patch_archive,
                       train_images_per_class, wnid_map, image_dim,
-                      num_workers, worker_batch_size):
+                      num_workers, worker_batch_size, ventilator_port,
+                      sink_port, logging_port):
     """Process the ILSVRC2010 training set.
 
     Parameters
@@ -467,17 +488,27 @@ def process_train_set(hdf5_file, train_archive, patch_archive,
     worker_batch_size : int
         The number of images each worker should send over the socket
         to the sink at a time.
+    ventilator_port : int
+        The port on which the ventilator should listen.
+    sink_port : int
+        The port on which the sink should listen.
+    logging_port : int
+        The port on localhost on which to open a `PUSH` socket
+        for sending :class:`logging.LogRecord`s.
+        If explicitly set to `None`, no socket will be opened.
 
     """
-    ventilator = TrainSetVentilator(train_archive, logging_port=5559)
+    ventilator = TrainSetVentilator(train_archive, logging_port=logging_port)
     workers = [TrainSetWorker(patch_archive, wnid_map, train_images_per_class,
-                              image_dim, worker_batch_size, logging_port=5559)
+                              image_dim, worker_batch_size,
+                              logging_port=logging_port)
                for _ in xrange(num_workers)]
     # TODO: additional arguments: flush_frequency, shuffle_seed
-    sink = TrainSetSink(hdf5_file, train_images_per_class, logging_port=5559)
+    sink = TrainSetSink(hdf5_file, train_images_per_class,
+                        logging_port=logging_port)
     manager = TrainSetManager(ventilator=ventilator, sink=sink,
-                              workers=workers, ventilator_port=5556,
-                              sink_port=5558, logging_port=5559)
+                              workers=workers, ventilator_port=ventilator_port,
+                              sink_port=sink_port, logging_port=logging_port)
     manager.launch()
     manager.wait()
 
