@@ -429,6 +429,16 @@ class TrainSetSink(HasZMQProcessLogger, DivideAndConquerSink):
 
 class TrainSetManager(LocalhostDivideAndConquerManager):
     def __init__(self, logging_port, *args, **kwargs):
+        # Set some reasonable high water marks, overrideable by keyword
+        # or by positional argument.
+        # PY3K keyword-only arguments would make this way nicer...
+        pos_args = dict(zip(('ventilator_hwm', 'worker_receiver_hwm',
+                             'worker_sender_hwm', 'sink_hwm'), args[6:]))
+        args = args[:6]
+        hwm_defaults = {'ventilator_hwm': 10, 'worker_receiver_hwm': 5,
+                        'worker_sender_hwm': 20, 'sink_hwm': 20}
+        for key in hwm_defaults:
+            kwargs[key] = pos_args.pop(key, kwargs.pop(key, hwm_defaults[key]))
         super(TrainSetManager, self).__init__(*args, **kwargs)
         self.logging_port = logging_port
 

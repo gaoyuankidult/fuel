@@ -469,9 +469,9 @@ class LocalhostDivideAndConquerManager(object):
 
     """
     def __init__(self, ventilator, sink, workers,
-                 ventilator_port, sink_port, ventilator_hwm=None,
+                 ventilator_port, sink_port, logger=None, ventilator_hwm=None,
                  worker_receiver_hwm=None, worker_sender_hwm=None,
-                 sink_hwm=None, logger=None):
+                 sink_hwm=None):
         self.ventilator = ventilator
         self.sink = sink
         self.workers = workers
