@@ -42,8 +42,10 @@ TEST_GROUNDTRUTH = 'ILSVRC2010_test_ground_truth.txt'
 TRAIN_IMAGES_TAR = 'ILSVRC2010_images_train.tar'
 VALID_IMAGES_TAR = 'ILSVRC2010_images_val.tar'
 TEST_IMAGES_TAR = 'ILSVRC2010_images_test.tar'
-IMAGE_TARS = TRAIN_IMAGES_TAR, VALID_IMAGES_TAR, TEST_IMAGES_TAR
-ALL_FILES = IMAGE_TARS + (TEST_GROUNDTRUTH, DEVKIT_ARCHIVE, PATCH_IMAGES_TAR)
+IMAGE_TARS = (TRAIN_IMAGES_TAR, VALID_IMAGES_TAR, TEST_IMAGES_TAR,
+              PATCH_IMAGES_TAR)
+PUBLIC_FILES = TEST_GROUNDTRUTH, DEVKIT_ARCHIVE
+ALL_FILES = PUBLIC_FILES + IMAGE_TARS
 
 
 def ilsvrc2010(input_directory, save_path, image_dim=256,
@@ -105,7 +107,7 @@ def ilsvrc2010(input_directory, save_path, image_dim=256,
                         xrange(1000)))
 
     train, valid, test, patch = [os.path.join(input_directory, fn)
-                                 for fn in IMAGE_TARS + (PATCH_IMAGES_TAR,)]
+                                 for fn in IMAGE_TARS]
 
     # Raw test data groundtruth, ILSVRC2010 IDs.
     raw_test_groundtruth = numpy.loadtxt(

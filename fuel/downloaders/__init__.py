@@ -13,6 +13,7 @@ from fuel.downloaders import cifar100
 from fuel.downloaders import iris
 from fuel.downloaders import mnist
 from fuel.downloaders import svhn
+from fuel.downloaders import ilsvrc2010
 
 all_downloaders = (
     ('binarized_mnist', binarized_mnist.fill_subparser),
@@ -21,4 +22,5 @@ all_downloaders = (
     ('cifar100', cifar100.fill_subparser),
     ('iris', iris.fill_subparser),
     ('mnist', mnist.fill_subparser),
-    ('svhn', svhn.fill_subparser))
+    ('svhn', svhn.fill_subparser),
+    ('ilsvrc2010', ilsvrc2010.fill_subparser))
