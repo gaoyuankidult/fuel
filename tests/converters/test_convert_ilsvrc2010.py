@@ -107,7 +107,7 @@ def create_jpeg_data(image):
 def create_fake_jpeg_tar(seed, min_num_images=5, max_num_images=50,
                          min_size=20, size_range=30, filenames=None,
                          random=True, gzip_probability=0.2):
-    """Create a TAR file of ranodmly generated JPEG files.
+    """Create a TAR file of randomly generated JPEG files.
 
     Parameters
     ----------
