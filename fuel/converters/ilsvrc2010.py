@@ -23,23 +23,23 @@ from fuel import config
 
 log = logging.getLogger(__name__)
 
-DEVKIT_ARCHIVE = 'ILSVRC2010_devkit-1.0.tar.gz'
+DEVKIT_ARCHIVE = 'ILSVRC2012_devkit-1.0.tar.gz'
 DEVKIT_META_PATH = 'devkit-1.0/data/meta.mat'
 DEVKIT_VALID_GROUNDTRUTH_PATH = ('devkit-1.0/data/'
-                                 'ILSVRC2010_validation_ground_truth.txt')
+                                 'ILSVRC2012_validation_ground_truth.txt')
 PATCH_IMAGES_TAR = 'patch_images.tar'
-TEST_GROUNDTRUTH = 'ILSVRC2010_test_ground_truth.txt'
-TRAIN_IMAGES_TAR = 'ILSVRC2010_images_train.tar'
-VALID_IMAGES_TAR = 'ILSVRC2010_images_val.tar'
-TEST_IMAGES_TAR = 'ILSVRC2010_images_test.tar'
+TEST_GROUNDTRUTH = 'ILSVRC2012_test_ground_truth.txt'
+TRAIN_IMAGES_TAR = 'ILSVRC2012_images_train.tar'
+VALID_IMAGES_TAR = 'ILSVRC2012_images_val.tar'
+TEST_IMAGES_TAR = 'ILSVRC2012_images_test.tar'
 IMAGE_TARS = (TRAIN_IMAGES_TAR, VALID_IMAGES_TAR, TEST_IMAGES_TAR,
               PATCH_IMAGES_TAR)
 PUBLIC_FILES = TEST_GROUNDTRUTH, DEVKIT_ARCHIVE
 ALL_FILES = PUBLIC_FILES + IMAGE_TARS
 
 
-def convert_ilsvrc2010(directory, output_directory,
-                       output_filename='ilsvrc2010.hdf5',
+def convert_ilsvrc2012(directory, output_directory,
+                       output_filename='ilsvrc2012.hdf5',
                        shuffle_seed=config.default_seed):
     """Converter for data from the ILSVRC 2010 competition.
 
@@ -99,7 +99,7 @@ def fill_subparser(subparser):
         "--shuffle-seed", help="Seed to use for randomizing order of the "
                                "training set on disk.",
         default=config.default_seed, type=int, required=False)
-    subparser.set_defaults(func=convert_ilsvrc2010)
+    subparser.set_defaults(func=convert_ilsvrc2012)
 
 
 def prepare_metadata(devkit_archive, test_groundtruth_path):
