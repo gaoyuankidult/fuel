@@ -1,4 +1,4 @@
-from fuel.converters.ilsvrc2010 import IMAGE_TARS
+from fuel.converters.ilsvrc2012 import IMAGE_TARS
 from fuel.downloaders.base import default_downloader
 
 
