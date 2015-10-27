@@ -18,7 +18,7 @@ import zmq
 
 # from fuel.server import recv_arrays, send_arrays
 from fuel.datasets import H5PYDataset
-from fuel.converters.ilsvrc2010 import (extract_patch_images,
+from fuel.converters.ilsvrc2012 import (extract_patch_images,
                                         image_consumer,
                                         load_from_tar_or_patch,
                                         other_set_producer,

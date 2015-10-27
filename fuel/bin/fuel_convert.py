@@ -51,7 +51,9 @@ def main(args=None):
         "-d", "--directory", help="directory in which input files reside",
         type=str, default=os.getcwd())
     convert_functions = {}
+
     for name, fill_subparser in built_in_datasets.items():
+
         subparser = subparsers.add_parser(
             name, parents=[parent_parser],
             help='Convert the {} dataset'.format(name))
@@ -64,7 +66,9 @@ def main(args=None):
 
     args = parser.parse_args(args)
     args_dict = vars(args)
+
     convert_function = convert_functions[args_dict.pop('which_')]
+    print(args_dict)
     try:
         output_paths = convert_function(**args_dict)
     except MissingInputFiles as e:

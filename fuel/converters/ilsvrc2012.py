@@ -29,9 +29,9 @@ DEVKIT_VALID_GROUNDTRUTH_PATH = ('devkit-1.0/data/'
                                  'ILSVRC2012_validation_ground_truth.txt')
 PATCH_IMAGES_TAR = 'patch_images.tar'
 TEST_GROUNDTRUTH = 'ILSVRC2012_test_ground_truth.txt'
-TRAIN_IMAGES_TAR = 'ILSVRC2012_images_train.tar'
-VALID_IMAGES_TAR = 'ILSVRC2012_images_val.tar'
-TEST_IMAGES_TAR = 'ILSVRC2012_images_test.tar'
+TRAIN_IMAGES_TAR = 'ILSVRC2012_img_train.tar'
+VALID_IMAGES_TAR = 'ILSVRC2012_img_val.tar'
+TEST_IMAGES_TAR = 'ILSVRC2012_img_test.tar'
 IMAGE_TARS = (TRAIN_IMAGES_TAR, VALID_IMAGES_TAR, TEST_IMAGES_TAR,
               PATCH_IMAGES_TAR)
 PUBLIC_FILES = TEST_GROUNDTRUTH, DEVKIT_ARCHIVE
@@ -63,24 +63,27 @@ def convert_ilsvrc2012(directory, output_directory,
 
     """
     devkit_path = os.path.join(directory, DEVKIT_ARCHIVE)
-    test_groundtruth_path = os.path.join(directory, TEST_GROUNDTRUTH)
+    print("devkit_path", devkit_path)
+    #test_groundtruth_path = os.path.join(directory, TEST_GROUNDTRUTH)
     train, valid, test, patch = [os.path.join(directory, fn)
                                  for fn in IMAGE_TARS]
-    n_train, valid_groundtruth, test_groundtruth, wnid_map = \
-        prepare_metadata(devkit_path, test_groundtruth_path)
-    n_valid, n_test = len(valid_groundtruth), len(test_groundtruth)
+    #n_train, valid_groundtruth, test_groundtruth, wnid_map = \
+    #    prepare_metadata(devkit_path, test_groundtruth_path)
+    n_train, valid_groundtruth, wnid_map = \
+        prepare_metadata(devkit_path)
+    n_valid, n_test = len(valid_groundtruth), 100000
     output_path = os.path.join(output_directory, output_filename)
 
     with h5py.File(output_path, 'w') as f:
         log.info('Creating HDF5 datasets...')
         prepare_hdf5_file(f, n_train, n_valid, n_test)
         log.info('Processing training set...')
-        process_train_set(f, train, patch, n_train, wnid_map, shuffle_seed)
+        process_train_set(f, train, n_train, wnid_map, shuffle_seed)
         log.info('Processing validation set...')
-        process_other_set(f, 'valid', valid, patch, valid_groundtruth, n_train)
-        log.info('Processing test set...')
-        process_other_set(f, 'test', test, patch, test_groundtruth,
-                          n_train + n_valid)
+        process_other_set(f, 'valid', valid, valid_groundtruth, n_train)
+        #log.info('Processing test set...')
+        #process_other_set(f, 'test', test, patch, test_groundtruth,
+        #                  n_train + n_valid)
         log.info('Done.')
 
     return (output_path,)
@@ -99,10 +102,11 @@ def fill_subparser(subparser):
         "--shuffle-seed", help="Seed to use for randomizing order of the "
                                "training set on disk.",
         default=config.default_seed, type=int, required=False)
-    subparser.set_defaults(func=convert_ilsvrc2012)
+    #subparser.set_defaults(func=convert_ilsvrc2012)
+    return convert_ilsvrc2012
 
 
-def prepare_metadata(devkit_archive, test_groundtruth_path):
+def prepare_metadata(devkit_archive):
     """Extract dataset metadata required for HDF5 file setup.
 
     Parameters
@@ -129,14 +133,15 @@ def prepare_metadata(devkit_archive, test_groundtruth_path):
 
     """
     # Read what's necessary from the development kit.
-    synsets, cost_matrix, raw_valid_groundtruth = read_devkit(devkit_archive)
+    #synsets, cost_matrix, raw_valid_groundtruth = read_devkit(devkit_archive)
+    synsets, raw_valid_groundtruth = read_devkit(devkit_archive)
 
     # Mapping to take WordNet IDs to our internal 0-999 encoding.
     wnid_map = dict(zip((s.decode('utf8') for s in synsets['WNID']),
                         xrange(1000)))
 
     # Map the 'ILSVRC2010 ID' to our zero-based ID.
-    ilsvrc_id_to_zero_based = dict(zip(synsets['ILSVRC2010_ID'],
+    ilsvrc_id_to_zero_based = dict(zip(synsets['ILSVRC2012_ID'],
                                    xrange(len(synsets))))
 
     # Map the validation set groundtruth to 0-999 labels.
@@ -144,22 +149,23 @@ def prepare_metadata(devkit_archive, test_groundtruth_path):
                          for id_ in raw_valid_groundtruth]
 
     # Raw test data groundtruth, ILSVRC2010 IDs.
-    raw_test_groundtruth = numpy.loadtxt(test_groundtruth_path,
-                                         dtype=numpy.int16)
+    #raw_test_groundtruth = numpy.loadtxt(test_groundtruth_path,
+    #                                     dtype=numpy.int16)
 
     # Map the test set groundtruth to 0-999 labels.
-    test_groundtruth = [ilsvrc_id_to_zero_based[id_]
-                        for id_ in raw_test_groundtruth]
+    #test_groundtruth = [ilsvrc_id_to_zero_based[id_]
+    #                    for id_ in raw_test_groundtruth]
 
     # Ascertain the number of filenames to prepare appropriate sized
     # arrays.
     n_train = int(synsets['num_train_images'].sum())
     log.info('Training set: {} images'.format(n_train))
     log.info('Validation set: {} images'.format(len(valid_groundtruth)))
-    log.info('Test set: {} images'.format(len(test_groundtruth)))
-    n_total = n_train + len(valid_groundtruth) + len(test_groundtruth)
+    #log.info('Test set: {} images'.format(len(test_groundtruth)))
+    #n_total = n_train + len(valid_groundtruth) + len(test_groundtruth)
+    n_total = n_train + len(valid_groundtruth)
     log.info('Total (train/valid/test): {} images'.format(n_total))
-    return n_train, valid_groundtruth, test_groundtruth, wnid_map
+    return n_train, valid_groundtruth, wnid_map
 
 
 def create_splits(n_train, n_valid, n_test):
@@ -200,7 +206,7 @@ def prepare_hdf5_file(hdf5_file, n_train, n_valid, n_test):
     hdf5_file.create_dataset('filenames', shape=(n_total, 1), dtype='S32')
 
 
-def process_train_set(hdf5_file, train_archive, patch_archive, n_train,
+def process_train_set(hdf5_file, train_archive, n_train,
                       wnid_map, shuffle_seed=None):
     """Process the ILSVRC2010 training set.
 
@@ -225,7 +231,7 @@ def process_train_set(hdf5_file, train_archive, patch_archive, n_train,
 
     """
     producer = partial(train_set_producer, train_archive=train_archive,
-                       patch_archive=patch_archive, wnid_map=wnid_map)
+                       wnid_map=wnid_map)
     consumer = partial(image_consumer, hdf5_file=hdf5_file,
                        num_expected=n_train, shuffle_seed=shuffle_seed)
     producer_consumer(producer, consumer)
@@ -238,7 +244,7 @@ def _write_to_hdf5(hdf5_file, index, image_filename, image_data,
     hdf5_file['targets'][index] = class_index
 
 
-def train_set_producer(socket, train_archive, patch_archive, wnid_map):
+def train_set_producer(socket, train_archive, wnid_map):
     """Load/send images from the training set TAR file or patch images.
 
     Parameters
@@ -254,7 +260,6 @@ def train_set_producer(socket, train_archive, patch_archive, wnid_map):
         Used to decode the filenames of the inner TAR files.
 
     """
-    patch_images = extract_patch_images(patch_archive, 'train')
     num_patched = 0
     with tar_open(train_archive) as tar:
         for inner_tar_info in tar:
@@ -263,8 +268,7 @@ def train_set_producer(socket, train_archive, patch_archive, wnid_map):
                 class_index = wnid_map[wnid]
                 filenames = sorted(info.name for info in inner
                                    if info.isfile())
-                images_gen = (load_from_tar_or_patch(inner, filename,
-                                                     patch_images)
+                images_gen = (load_from_tar(inner, filename)
                               for filename in filenames)
                 pathless_filenames = (os.path.split(fn)[-1]
                                       for fn in filenames)
@@ -274,8 +278,6 @@ def train_set_producer(socket, train_archive, patch_archive, wnid_map):
                         num_patched += 1
                     socket.send_pyobj((image_fn, class_index), zmq.SNDMORE)
                     socket.send(image_data)
-    if num_patched != len(patch_images):
-        raise ValueError('not all patch images were used')
 
 
 def image_consumer(socket, hdf5_file, num_expected, shuffle_seed=None,
@@ -314,7 +316,7 @@ def image_consumer(socket, hdf5_file, num_expected, shuffle_seed=None,
             pb.update(i + 1)
 
 
-def process_other_set(hdf5_file, which_set, image_archive, patch_archive,
+def process_other_set(hdf5_file, which_set, image_archive,
                       groundtruth, offset):
     """Process the validation or test set.
 
@@ -340,14 +342,13 @@ def process_other_set(hdf5_file, which_set, image_archive, patch_archive,
 
     """
     producer = partial(other_set_producer, image_archive=image_archive,
-                       patch_archive=patch_archive,
                        groundtruth=groundtruth, which_set=which_set)
     consumer = partial(image_consumer, hdf5_file=hdf5_file,
                        num_expected=len(groundtruth), offset=offset)
     producer_consumer(producer, consumer)
 
 
-def other_set_producer(socket, which_set, image_archive, patch_archive,
+def other_set_producer(socket, which_set, image_archive,
                        groundtruth):
     """Push image files read from the valid/test set TAR to a socket.
 
@@ -368,11 +369,10 @@ def other_set_producer(socket, which_set, image_archive, patch_archive,
         image, sorted by filename.
 
     """
-    patch_images = extract_patch_images(patch_archive, which_set)
     num_patched = 0
     with tar_open(image_archive) as tar:
         filenames = sorted(info.name for info in tar if info.isfile())
-        images = (load_from_tar_or_patch(tar, filename, patch_images)
+        images = (load_from_tar(tar, filename)
                   for filename in filenames)
         pathless_filenames = (os.path.split(fn)[-1] for fn in filenames)
         image_iterator = equizip(images, pathless_filenames, groundtruth)
@@ -381,8 +381,45 @@ def other_set_producer(socket, which_set, image_archive, patch_archive,
                 num_patched += 1
             socket.send_pyobj((filename, class_index), zmq.SNDMORE)
             socket.send(image_data, copy=False)
-    if num_patched != len(patch_images):
-        raise Exception
+
+
+
+
+def load_from_tar(tar, image_filename):
+    """Do everything necessary to process a image inside a TAR.
+
+    Parameters
+    ----------
+    tar : `TarFile` instance
+        The tar from which to read `image_filename`.
+    image_filename : str
+        Fully-qualified path inside of `tar` from which to read an
+        image file.
+    patch_images : dict
+        A dictionary containing filenames (without path) of replacements
+        to be substituted in place of the version of the same file found
+        in `tar`.
+
+    Returns
+    -------
+    image_data : bytes
+        The JPEG bytes representing either the image from the TAR archive
+        or its replacement from the patch dictionary.
+    patched : bool
+        True if the image was retrieved from the patch dictionary. False
+        if it was retrieved from the TAR file.
+
+    """
+
+    patched = False
+    try:
+        image_bytes = tar.extractfile(image_filename).read()
+        numpy.array(Image.open(io.BytesIO(image_bytes)))
+    except (IOError, OSError):
+        with gzip.GzipFile(fileobj=tar.extractfile(image_filename)) as gz:
+            image_bytes = gz.read()
+            numpy.array(Image.open(io.BytesIO(image_bytes)))
+    return image_bytes, patched
 
 
 def load_from_tar_or_patch(tar, image_filename, patch_images):
@@ -447,13 +484,15 @@ def read_devkit(f):
     with tar_open(f) as tar:
         # Metadata table containing class hierarchy, textual descriptions, etc.
         meta_mat = tar.extractfile(DEVKIT_META_PATH)
-        synsets, cost_matrix = read_metadata_mat_file(meta_mat)
+        #synsets, cost_matrix = read_metadata_mat_file(meta_mat)
+        synsets = read_metadata_mat_file(meta_mat)
 
         # Raw validation data groundtruth, ILSVRC2010 IDs. Confusingly
         # distributed inside the development kit archive.
         raw_valid_groundtruth = numpy.loadtxt(tar.extractfile(
             DEVKIT_VALID_GROUNDTRUTH_PATH), dtype=numpy.int16)
-    return synsets, cost_matrix, raw_valid_groundtruth
+    #return synsets, cost_matrix, raw_valid_groundtruth
+    return synsets, raw_valid_groundtruth
 
 
 def read_metadata_mat_file(meta_mat):
@@ -502,9 +541,9 @@ def read_metadata_mat_file(meta_mat):
     """
     mat = loadmat(meta_mat, squeeze_me=True)
     synsets = mat['synsets']
-    cost_matrix = mat['cost_matrix']
+    #cost_matrix = mat['cost_matrix']
     new_dtype = numpy.dtype([
-        ('ILSVRC2010_ID', numpy.int16),
+        ('ILSVRC2012_ID', numpy.int16),
         ('WNID', ('S', max(map(len, synsets['WNID'])))),
         ('wordnet_height', numpy.int8),
         ('gloss', ('S', max(map(len, synsets['gloss'])))),
@@ -514,7 +553,7 @@ def read_metadata_mat_file(meta_mat):
         ('num_train_images', numpy.uint16)
     ])
     new_synsets = numpy.empty(synsets.shape, dtype=new_dtype)
-    for attr in ['ILSVRC2010_ID', 'WNID', 'wordnet_height', 'gloss',
+    for attr in ['ILSVRC2012_ID', 'WNID', 'wordnet_height', 'gloss',
                  'num_children', 'words', 'num_train_images']:
         new_synsets[attr] = synsets[attr]
     children = [numpy.atleast_1d(ch) for ch in synsets['children']]
@@ -525,7 +564,7 @@ def read_metadata_mat_file(meta_mat):
         for c in children
     ]
     new_synsets['children'] = padded_children
-    return new_synsets, cost_matrix
+    return new_synsets  #cost_matrix
 
 
 def extract_patch_images(f, which_set):
